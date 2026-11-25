@@ -187,6 +187,19 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".service.NudgeDeviceAdmin"
+            android:description="@string/device_admin_description"
+            android:exported="false"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_policies" />
+        </receiver>
+
         <!-- Home-screen widgets (Jetpack Glance). `exported="true"` is mandatory on all three:
              the launcher is a different process and must be able to broadcast APPWIDGET_UPDATE to
              them. They carry no data of their own and read through the same repositories the app
