@@ -1,6 +1,7 @@
 package com.astraedus.nudge.ui.screens.settings
 
 import android.app.AppOpsManager
+import android.app.admin.DevicePolicyManager
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
@@ -77,6 +78,7 @@ import com.astraedus.nudge.domain.lock.LockedToggle
 import com.astraedus.nudge.domain.lock.SettingsWeakening
 import com.astraedus.nudge.domain.lock.StrictModeChallenge
 import com.astraedus.nudge.service.AccessibilityConnectionSignal
+import com.astraedus.nudge.service.NudgeDeviceAdmin
 import com.astraedus.nudge.service.ProtectionStatus
 import com.astraedus.nudge.ui.backup.BackupDialogs
 import com.astraedus.nudge.ui.backup.BackupViewModel
@@ -108,7 +110,8 @@ fun SettingsScreen(
     // See rememberPermissionStates: these three used to be `remember { mutableStateOf(x) }` —
     // computed once at first composition and never again — which is how a green tick survived a
     // dead accessibility service (an in-place update, or a phone that killed the process overnight).
-    val permissionStates = rememberPermissionStates(context)
+    var adminRefresh by remember { mutableIntStateOf(0) }
+    val permissionStates = rememberPermissionStates(context, adminRefresh)
     val accessibilityEnabled = permissionStates.accessibility
     val overlayEnabled = permissionStates.overlay
     val usageStatsEnabled = permissionStates.usageStats
@@ -269,6 +272,42 @@ fun SettingsScreen(
                 granted = hasGrayscalePermission(context),
                 icon = { Icon(Icons.Outlined.InvertColors, contentDescription = null) },
                 onClick = onNavigateToGrayscaleGuide
+            )
+
+            PermissionItem(
+                title = "Uninstall protection",
+                description = if (permissionStates.deviceAdmin) {
+                    "On — Android won't let Nudge be uninstalled until this is turned off. Tap to turn off."
+                } else {
+                    "Off — tap to turn on (uses Device Admin)"
+                },
+                granted = permissionStates.deviceAdmin,
+                icon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
+                onClick = {
+                    val component = ComponentName(context, NudgeDeviceAdmin::class.java)
+                    if (!permissionStates.deviceAdmin) {
+                        context.startActivity(
+                            Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
+                                putExtra(
+                                    DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                                    "Stops Nudge from being uninstalled while this is on."
+                                )
+                            }
+                        )
+                    } else {
+                        val turnOff = {
+                            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                            dpm.removeActiveAdmin(component)
+                            adminRefresh += 1
+                        }
+                        if (strictModeEnabled) {
+                            requestUnlock("Turn off uninstall protection") { turnOff() }
+                        } else {
+                            turnOff()
+                        }
+                    }
+                }
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -757,7 +796,8 @@ private data class PermissionStates(
     val accessibility: Boolean,
     val accessibilityCrashed: Boolean,
     val overlay: Boolean,
-    val usageStats: Boolean
+    val usageStats: Boolean,
+    val deviceAdmin: Boolean
 )
 
 private fun readPermissionStates(context: Context): PermissionStates {
@@ -766,8 +806,14 @@ private fun readPermissionStates(context: Context): PermissionStates {
         accessibility = accessibility.working,
         accessibilityCrashed = accessibility.crashed,
         overlay = Settings.canDrawOverlays(context),
-        usageStats = hasUsageAccess(context)
+        usageStats = hasUsageAccess(context),
+        deviceAdmin = isDeviceAdminActive(context)
     )
+}
+
+private fun isDeviceAdminActive(context: Context): Boolean {
+    val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+    return dpm.isAdminActive(ComponentName(context, NudgeDeviceAdmin::class.java))
 }
 
 /** [readAccessibilityState]'s two-boolean answer, shared by every refresh path below. */
@@ -820,8 +866,10 @@ private fun readAccessibilityState(context: Context): AccessibilityReadout {
  * is never trusted over a fresh one.
  */
 @Composable
-private fun rememberPermissionStates(context: Context): PermissionStates {
+private fun rememberPermissionStates(context: Context, refreshKey: Int = 0): PermissionStates {
     var state by remember { mutableStateOf(readPermissionStates(context)) }
+
+    LaunchedEffect(refreshKey) { state = readPermissionStates(context) }
 
     DisposableEffect(context) {
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
