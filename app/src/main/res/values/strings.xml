@@ -81,4 +81,5 @@
     <string name="home_top_blocked_empty">Nothing blocked in the last 7 days. Rules you add will show up here.</string>
     <!-- TalkBack action label for a row that opens one app's detail screen. -->
     <string name="home_top_blocked_row_open">Open %1$s details</string>
+    <string name="device_admin_description">Stops Nudge from being uninstalled while this is on.</string>
 </resources>
